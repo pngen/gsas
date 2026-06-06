@@ -73,12 +73,20 @@ func (cc *ComplianceChecker) CheckPrimitive(p GovernancePrimitive) (*ComplianceR
 	testCtx := NewDeterministicContext(map[string]interface{}{}, 0)
 	result := p.Evaluate(testCtx)
 
-	if _, ok := result["valid"]; !ok {
+	valid, ok := result["valid"]
+	if !ok {
 		report.Compliant = false
 		report.Violations = append(report.Violations, ComplianceViolation{
 			Primitive:   name,
 			Requirement: "evaluate_contract",
 			Details:     "Evaluate() must return map with 'valid' key",
+		})
+	} else if _, ok := valid.(bool); !ok {
+		report.Compliant = false
+		report.Violations = append(report.Violations, ComplianceViolation{
+			Primitive:   name,
+			Requirement: "evaluate_contract",
+			Details:     "Evaluate() 'valid' value must be a boolean",
 		})
 	}
 

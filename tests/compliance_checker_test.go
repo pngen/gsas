@@ -25,6 +25,13 @@ func (b *BadEvaluatePrimitive) Evaluate(ctx interface{}) map[string]interface{} 
 	return map[string]interface{}{"wrong_key": true}
 }
 
+type NonBoolValidPrimitive struct{}
+
+func (b *NonBoolValidPrimitive) Version() string { return "1.0.0" }
+func (b *NonBoolValidPrimitive) Evaluate(ctx interface{}) map[string]interface{} {
+	return map[string]interface{}{"valid": "true"}
+}
+
 func TestComplianceCheckerValidPrimitive(t *testing.T) {
 	checker := core.NewComplianceChecker()
 	p := &MockPrimitive{name: "valid", version: "1.0.0", valid: true}
@@ -52,4 +59,15 @@ func TestComplianceCheckerNilPrimitive(t *testing.T) {
 	checker := core.NewComplianceChecker()
 	_, err := checker.CheckPrimitive(nil)
 	assert.Error(t, err)
+}
+
+func TestComplianceCheckerRejectsNonBoolValid(t *testing.T) {
+	checker := core.NewComplianceChecker()
+	p := &NonBoolValidPrimitive{}
+
+	report, err := checker.CheckPrimitive(p)
+
+	assert.NoError(t, err)
+	assert.False(t, report.Compliant)
+	assert.Contains(t, report.Violations[0].Details, "boolean")
 }

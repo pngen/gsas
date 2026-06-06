@@ -40,6 +40,40 @@ func evaluate() {
 	assert.Contains(t, err.Error(), "time")
 }
 
+func TestBannedImportBlockGo(t *testing.T) {
+	invalidCode := `
+package main
+
+import (
+	"os"
+)
+
+func evaluate() map[string]interface{} {
+	return map[string]interface{}{"valid": true, "path": os.Args}
+}
+`
+	enforcer := &core.DeterminismEnforcer{}
+	err := enforcer.ValidateDeterministic(invalidCode)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "os")
+}
+
+func TestBannedImportAliasGo(t *testing.T) {
+	invalidCode := `
+package main
+
+import r "math/rand"
+
+func evaluate() map[string]interface{} {
+	return map[string]interface{}{"valid": true, "value": r.Int()}
+}
+`
+	enforcer := &core.DeterminismEnforcer{}
+	err := enforcer.ValidateDeterministic(invalidCode)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "math/rand")
+}
+
 func TestBannedFunctionTimeNow(t *testing.T) {
 	invalidCode := `
 package main

@@ -18,8 +18,8 @@ type GovernanceProof struct {
 	EvaluationOrder   []string          `json:"evaluation_order"`
 
 	// What was decided
-	Decision           bool     `json:"decision"`
-	SignalCommitments  []string `json:"signal_commitments"` // SHA256 hashes of signals
+	Decision          bool     `json:"decision"`
+	SignalCommitments []string `json:"signal_commitments"` // SHA256 hashes of signals
 
 	// Metadata
 	GeneratedAt int64 `json:"generated_at"` // Logical timestamp
@@ -44,17 +44,27 @@ func (gp *GovernanceProof) ReconstructContext(index int) map[string]interface{} 
 
 // CommitSignal creates cryptographic commitment to signal
 func (gp *GovernanceProof) CommitSignal(result map[string]interface{}) string {
-	signalData := map[string]interface{}{
-		"valid":     result["valid"],
-		"metadata":  result["metadata"],
-		"timestamp": result["timestamp"],
-	}
-	data, _ := json.Marshal(signalData)
-	return fmt.Sprintf("%x", sha256.Sum256(data))
+	return commitSignal(result)
 }
 
 // ProofGenerator generates cryptographic proofs for governance decisions
 type ProofGenerator struct{}
+
+func cloneStringMap(input map[string]string) map[string]string {
+	cloned := make(map[string]string, len(input))
+	for key, value := range input {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func commitSignal(result map[string]interface{}) string {
+	data, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Sprintf("error:%x", sha256.Sum256([]byte(err.Error())))
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(data))
+}
 
 // GenerateProof generates a cryptographic proof of governance evaluation
 func (pg *ProofGenerator) GenerateProof(
@@ -78,10 +88,11 @@ func (pg *ProofGenerator) GenerateProofWithTime(
 	for i, signal := range signals {
 		signalCommitments[i] = pg.CommitSignal(signal)
 	}
+	evaluationOrder := append([]string(nil), evaluatedPrimitives...)
 
 	return &GovernanceProof{
-		PrimitiveVersions: primitiveVersions,
-		EvaluationOrder:   evaluatedPrimitives,
+		PrimitiveVersions: cloneStringMap(primitiveVersions),
+		EvaluationOrder:   evaluationOrder,
 		Decision:          decision,
 		SignalCommitments: signalCommitments,
 		GeneratedAt:       logicalTime,
@@ -90,16 +101,5 @@ func (pg *ProofGenerator) GenerateProofWithTime(
 
 // CommitSignal creates cryptographic commitment to signal
 func (pg *ProofGenerator) CommitSignal(result map[string]interface{}) string {
-	signalData := map[string]interface{}{
-		"valid":    result["valid"],
-		"metadata": result["metadata"],
-	}
-	if ts, ok := result["timestamp"]; ok {
-		signalData["timestamp"] = ts
-	}
-	data, err := json.Marshal(signalData)
-	if err != nil {
-		return fmt.Sprintf("error:%x", sha256.Sum256([]byte(err.Error())))
-	}
-	return fmt.Sprintf("%x", sha256.Sum256(data))
+	return commitSignal(result)
 }
