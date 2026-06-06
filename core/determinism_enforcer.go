@@ -7,7 +7,10 @@ package core
 import (
 	"errors"
 	"fmt"
+	"go/parser"
+	"go/token"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -28,6 +31,7 @@ var BannedImports = []string{
 	"time", "datetime", "random", "os", "sys",
 	"socket", "urllib", "requests", "subprocess",
 	"threading", "multiprocessing", "asyncio",
+	"net", "net/http", "math/rand", "crypto/rand", "os/exec",
 }
 
 // BannedFunctions lists function calls that violate determinism
@@ -41,6 +45,15 @@ var BannedFunctions = []string{
 	"log.Print", "log.Println", "log.Printf",
 }
 
+func isBannedImport(importPath string) bool {
+	for _, banned := range BannedImports {
+		if importPath == banned || strings.HasPrefix(importPath, banned+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // ValidateDeterministic validates that Go source code is deterministic
 // Uses pattern matching for cross-language compatibility
 func (de *DeterminismEnforcer) ValidateDeterministic(sourceCode string) error {
@@ -50,12 +63,30 @@ func (de *DeterminismEnforcer) ValidateDeterministic(sourceCode string) error {
 
 	var violations []string
 
-	// Check for banned imports
+	goImportsParsed := false
+	if file, err := parser.ParseFile(token.NewFileSet(), "", sourceCode, parser.ImportsOnly); err == nil {
+		goImportsParsed = true
+		for _, spec := range file.Imports {
+			importPath, err := strconv.Unquote(spec.Path.Value)
+			if err != nil {
+				continue
+			}
+			if isBannedImport(importPath) {
+				violations = append(violations, fmt.Sprintf("Banned import '%s' found", importPath))
+			}
+		}
+	}
+
+	// Check for banned imports in Python-style snippets, or Go snippets that cannot be parsed.
 	for _, imp := range BannedImports {
 		patterns := []string{
-			fmt.Sprintf(`import\s+"%s"`, regexp.QuoteMeta(imp)),
-			fmt.Sprintf(`import\s+%s\b`, regexp.QuoteMeta(imp)),
 			fmt.Sprintf(`from\s+%s\s+import`, regexp.QuoteMeta(imp)),
+		}
+		if !goImportsParsed {
+			patterns = append(patterns,
+				fmt.Sprintf(`import\s+"%s"`, regexp.QuoteMeta(imp)),
+				fmt.Sprintf(`import\s+%s\b`, regexp.QuoteMeta(imp)),
+			)
 		}
 		for _, pattern := range patterns {
 			re := regexp.MustCompile(pattern)
@@ -80,9 +111,9 @@ func (de *DeterminismEnforcer) ValidateDeterministic(sourceCode string) error {
 
 	// Check for global mutable state patterns
 	globalMutablePatterns := []string{
-		`var\s+\w+\s*=\s*make\s*\(`,      // var x = make(...)
-		`var\s+\w+\s*=\s*\[\]`,            // var x = []...
-		`var\s+\w+\s*=\s*map\s*\[`,        // var x = map[...]
+		`var\s+\w+\s*=\s*make\s*\(`, // var x = make(...)
+		`var\s+\w+\s*=\s*\[\]`,      // var x = []...
+		`var\s+\w+\s*=\s*map\s*\[`,  // var x = map[...]
 	}
 	for _, pattern := range globalMutablePatterns {
 		re := regexp.MustCompile(pattern)

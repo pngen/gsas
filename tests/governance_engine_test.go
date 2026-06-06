@@ -90,6 +90,13 @@ func TestGovernanceEngineEmptyID(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestGovernanceEngineRejectsEmptyVersionAtRegistration(t *testing.T) {
+	engine := core.NewGovernanceEngine()
+	err := engine.RegisterPrimitive("bad_version", &BadVersionPrimitive{})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "version")
+}
+
 func TestGovernanceEngineClear(t *testing.T) {
 	engine := core.NewGovernanceEngine()
 	p := &MockPrimitive{name: "test", version: "1.0.0", valid: true}

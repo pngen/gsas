@@ -11,10 +11,17 @@ import (
 
 // getPrimitiveName safely gets name from primitive
 func getPrimitiveName(p GovernancePrimitive, index int) string {
+	if p == nil {
+		return fmt.Sprintf("primitive_%d", index)
+	}
 	if np, ok := p.(NamedPrimitive); ok {
 		return np.Name()
 	}
 	return fmt.Sprintf("primitive_%d", index)
+}
+
+func clonePrimitives(primitives []GovernancePrimitive) []GovernancePrimitive {
+	return append([]GovernancePrimitive(nil), primitives...)
 }
 
 // PrimitiveComposer composes primitives with explicit semantics
@@ -22,7 +29,7 @@ type PrimitiveComposer struct{}
 
 // SequentialAnd returns a primitive that requires all input primitives to pass in order
 func (pc *PrimitiveComposer) SequentialAnd(primitives []GovernancePrimitive) GovernancePrimitive {
-	primitivesCaptured := primitives // Capture for closure
+	primitivesCaptured := clonePrimitives(primitives)
 
 	return &sequentialAndPrimitive{
 		primitives: primitivesCaptured,
@@ -36,6 +43,10 @@ type sequentialAndPrimitive struct {
 func (p *sequentialAndPrimitive) Version() string {
 	subVersions := make([]string, len(p.primitives))
 	for i, primitive := range p.primitives {
+		if primitive == nil {
+			subVersions[i] = "nil"
+			continue
+		}
 		subVersions[i] = primitive.Version()
 	}
 	h := fnv.New64a()
@@ -47,6 +58,16 @@ func (p *sequentialAndPrimitive) Version() string {
 
 func (p *sequentialAndPrimitive) Evaluate(context interface{}) map[string]interface{} {
 	for i, primitive := range p.primitives {
+		if primitive == nil {
+			return map[string]interface{}{
+				"valid": false,
+				"metadata": map[string]interface{}{
+					"reason":       fmt.Sprintf("Primitive %s is missing", getPrimitiveName(primitive, i)),
+					"failed_index": i,
+				},
+				"evidence": []interface{}{},
+			}
+		}
 		result := primitive.Evaluate(context)
 		valid, ok := result["valid"].(bool)
 		if !ok || !valid {
@@ -71,7 +92,7 @@ func (p *sequentialAndPrimitive) Evaluate(context interface{}) map[string]interf
 
 // ParallelAnd returns a primitive that requires all input primitives to pass, order independent
 func (pc *PrimitiveComposer) ParallelAnd(primitives []GovernancePrimitive) GovernancePrimitive {
-	primitivesCaptured := primitives
+	primitivesCaptured := clonePrimitives(primitives)
 
 	return &parallelAndPrimitive{
 		primitives: primitivesCaptured,
@@ -85,6 +106,10 @@ type parallelAndPrimitive struct {
 func (p *parallelAndPrimitive) Version() string {
 	subVersions := make([]string, len(p.primitives))
 	for i, primitive := range p.primitives {
+		if primitive == nil {
+			subVersions[i] = "nil"
+			continue
+		}
 		subVersions[i] = primitive.Version()
 	}
 	h := fnv.New64a()
@@ -97,6 +122,10 @@ func (p *parallelAndPrimitive) Version() string {
 func (p *parallelAndPrimitive) Evaluate(context interface{}) map[string]interface{} {
 	results := make([]bool, len(p.primitives))
 	for i, primitive := range p.primitives {
+		if primitive == nil {
+			results[i] = false
+			continue
+		}
 		result := primitive.Evaluate(context)
 		valid, ok := result["valid"].(bool)
 		results[i] = ok && valid
@@ -137,7 +166,7 @@ func (p *parallelAndPrimitive) Evaluate(context interface{}) map[string]interfac
 
 // Threshold returns a primitive that requires at least k of the input primitives to pass
 func (pc *PrimitiveComposer) Threshold(primitives []GovernancePrimitive, k int) GovernancePrimitive {
-	primitivesCaptured := primitives
+	primitivesCaptured := clonePrimitives(primitives)
 	kCaptured := k
 
 	return &thresholdPrimitive{
@@ -154,6 +183,10 @@ type thresholdPrimitive struct {
 func (p *thresholdPrimitive) Version() string {
 	subVersions := make([]string, len(p.primitives))
 	for i, primitive := range p.primitives {
+		if primitive == nil {
+			subVersions[i] = "nil"
+			continue
+		}
 		subVersions[i] = primitive.Version()
 	}
 	h := fnv.New64a()
@@ -164,8 +197,22 @@ func (p *thresholdPrimitive) Version() string {
 }
 
 func (p *thresholdPrimitive) Evaluate(context interface{}) map[string]interface{} {
+	if p.k <= 0 || p.k > len(p.primitives) {
+		return map[string]interface{}{
+			"valid": false,
+			"metadata": map[string]interface{}{
+				"reason": fmt.Sprintf("Invalid threshold %d for %d primitives", p.k, len(p.primitives)),
+			},
+			"evidence": []interface{}{},
+		}
+	}
+
 	results := make([]bool, len(p.primitives))
 	for i, primitive := range p.primitives {
+		if primitive == nil {
+			results[i] = false
+			continue
+		}
 		result := primitive.Evaluate(context)
 		valid, ok := result["valid"].(bool)
 		results[i] = ok && valid

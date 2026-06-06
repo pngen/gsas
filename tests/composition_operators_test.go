@@ -37,6 +37,19 @@ func TestSequentialAndFirstFails(t *testing.T) {
 	assert.Contains(t, meta["reason"], "fail")
 }
 
+func TestSequentialAndCopiesPrimitiveSlice(t *testing.T) {
+	composer := &core.PrimitiveComposer{}
+
+	primitives := []core.GovernancePrimitive{
+		&MockPrimitive{name: "pass", version: "1.0", valid: true},
+	}
+	composed := composer.SequentialAnd(primitives)
+	primitives[0] = &MockPrimitive{name: "fail_after_compose", version: "1.0", valid: false}
+
+	result := composed.Evaluate(nil)
+	assert.True(t, result["valid"].(bool))
+}
+
 func TestParallelAndAllPass(t *testing.T) {
 	composer := &core.PrimitiveComposer{}
 
@@ -95,4 +108,18 @@ func TestThresholdNotMet(t *testing.T) {
 	result := composed.Evaluate(nil)
 
 	assert.False(t, result["valid"].(bool))
+}
+
+func TestThresholdInvalidKFailsClosed(t *testing.T) {
+	composer := &core.PrimitiveComposer{}
+
+	primitives := []core.GovernancePrimitive{
+		&MockPrimitive{name: "a", version: "1.0", valid: false},
+	}
+
+	zeroThreshold := composer.Threshold(primitives, 0)
+	assert.False(t, zeroThreshold.Evaluate(nil)["valid"].(bool))
+
+	impossibleThreshold := composer.Threshold(primitives, 2)
+	assert.False(t, impossibleThreshold.Evaluate(nil)["valid"].(bool))
 }

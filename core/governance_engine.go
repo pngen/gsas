@@ -48,6 +48,10 @@ func (ge *GovernanceEngine) RegisterPrimitive(id string, p GovernancePrimitive) 
 	if id == "" {
 		return errors.New("primitive ID cannot be empty")
 	}
+	version := p.Version()
+	if version == "" {
+		return errors.New("primitive version cannot be empty")
+	}
 
 	ge.mu.Lock()
 	defer ge.mu.Unlock()
@@ -61,7 +65,7 @@ func (ge *GovernanceEngine) RegisterPrimitive(id string, p GovernancePrimitive) 
 
 	ge.primitives = append(ge.primitives, p)
 	ge.primitiveIDs = append(ge.primitiveIDs, id)
-	ge.versions[id] = p.Version()
+	ge.versions[id] = version
 
 	return nil
 }
