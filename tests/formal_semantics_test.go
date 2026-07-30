@@ -26,8 +26,8 @@ func TestDeterministicContext(t *testing.T) {
 
 func TestGovernanceSignal(t *testing.T) {
 	signal := &core.GovernanceSignalSpec{
-		Name:   "test_primitive",
-		Valid:  true,
+		Name:     "test_primitive",
+		Valid:    true,
 		Metadata: map[string]interface{}{"reason": "test"},
 	}
 
@@ -38,16 +38,16 @@ func TestGovernanceSignal(t *testing.T) {
 
 func TestCompositeGovernanceDecision(t *testing.T) {
 	signal := &core.GovernanceSignalSpec{
-		Name:   "test_primitive",
-		Valid:  true,
+		Name:     "test_primitive",
+		Valid:    true,
 		Metadata: map[string]interface{}{},
 	}
 
 	decision := &core.CompositeGovernanceDecisionSpec{
-		Permitted:     true,
-		Signals:       []core.GovernanceSignalSpec{*signal},
+		Permitted:      true,
+		Signals:        []core.GovernanceSignalSpec{*signal},
 		FailureReasons: []string{},
-		Proof:         map[string]interface{}{},
+		Proof:          map[string]interface{}{},
 	}
 
 	assert.True(t, decision.Permitted)
@@ -90,5 +90,5 @@ func TestDeterministicContextGetItem(t *testing.T) {
 
 	val, err := ctx.GetItem("x")
 	assert.NoError(t, err)
-	assert.Equal(t, float64(1), val) // JSON unmarshaling converts to float64
+	assert.Equal(t, 1, val)
 }

@@ -7,6 +7,7 @@ package core
 import (
 	"errors"
 	"fmt"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"regexp"
@@ -14,39 +15,49 @@ import (
 	"strings"
 )
 
-// NonDeterministicPrimitiveError is raised when a primitive is detected as non-deterministic
+// NonDeterministicPrimitiveError is raised when a primitive is detected as non-deterministic.
 type NonDeterministicPrimitiveError struct {
 	msg string
 }
 
-func (e *NonDeterministicPrimitiveError) Error() string {
-	return e.msg
-}
+func (e *NonDeterministicPrimitiveError) Error() string { return e.msg }
 
-// DeterminismEnforcer enforces determinism in governance primitives
+// DeterminismEnforcer performs conservative static checks on caller-supplied source.
+// It is a validation aid, not a sandbox for already-compiled Go code.
 type DeterminismEnforcer struct{}
 
-// BannedImports lists imports that violate determinism
-var BannedImports = []string{
-	"time", "datetime", "random", "os", "sys",
-	"socket", "urllib", "requests", "subprocess",
-	"threading", "multiprocessing", "asyncio",
-	"net", "net/http", "math/rand", "crypto/rand", "os/exec",
+var bannedImports = [...]string{
+	"time", "datetime", "random", "os", "sys", "socket", "urllib", "requests",
+	"subprocess", "threading", "multiprocessing", "asyncio", "net", "net/http",
+	"math/rand", "crypto/rand", "os/exec", "syscall", "unsafe", "plugin",
 }
 
-// BannedFunctions lists function calls that violate determinism
-var BannedFunctions = []string{
+var bannedFunctions = [...]string{
 	"time.Now", "time.Since", "time.Until", "time.Sleep",
 	"rand.Int", "rand.Float", "rand.Intn", "rand.Read",
-	"os.Getenv", "os.Setenv", "os.Open", "os.Create",
-	"os.ReadFile", "os.WriteFile", "os.Remove",
-	"net.Dial", "net.Listen", "http.Get", "http.Post",
-	"exec.Command", "fmt.Print", "fmt.Println",
-	"log.Print", "log.Println", "log.Printf",
+	"os.Getenv", "os.Setenv", "os.Open", "os.Create", "os.ReadFile", "os.WriteFile", "os.Remove",
+	"net.Dial", "net.Listen", "http.Get", "http.Post", "exec.Command",
+	"fmt.Print", "fmt.Println", "fmt.Printf", "log.Print", "log.Println", "log.Printf",
+}
+
+// BannedImports and BannedFunctions are compatibility snapshots. Mutating them does not
+// weaken validation; enforcement uses the private immutable tables above.
+var BannedImports = append([]string(nil), bannedImports[:]...)
+var BannedFunctions = append([]string(nil), bannedFunctions[:]...)
+
+var allowedGoImports = map[string]struct{}{
+	"bytes": {}, "crypto/sha256": {}, "encoding/hex": {}, "encoding/json": {},
+	"errors": {}, "math": {}, "regexp": {}, "sort": {},
+	"strconv": {}, "strings": {}, "unicode": {}, "unicode/utf8": {},
+}
+
+var allowedPythonImports = map[string]struct{}{
+	"decimal": {}, "fractions": {}, "hashlib": {}, "json": {}, "math": {},
+	"re": {}, "typing": {},
 }
 
 func isBannedImport(importPath string) bool {
-	for _, banned := range BannedImports {
+	for _, banned := range bannedImports {
 		if importPath == banned || strings.HasPrefix(importPath, banned+"/") {
 			return true
 		}
@@ -54,96 +65,150 @@ func isBannedImport(importPath string) bool {
 	return false
 }
 
-// ValidateDeterministic validates that Go source code is deterministic
-// Uses pattern matching for cross-language compatibility
+// ValidateDeterministic validates source conservatively. Go source is fully parsed;
+// malformed source and imports outside the pure allow-list fail closed.
 func (de *DeterminismEnforcer) ValidateDeterministic(sourceCode string) error {
 	if strings.TrimSpace(sourceCode) == "" {
 		return &NonDeterministicPrimitiveError{msg: "empty source code"}
 	}
 
+	if regexp.MustCompile(`(?m)^\s*package\s+[A-Za-z_]\w*`).MatchString(sourceCode) {
+		return validateDeterministicGo(sourceCode)
+	}
+	return validateDeterministicScript(sourceCode)
+}
+
+func validateDeterministicGo(sourceCode string) error {
+	file, err := parser.ParseFile(token.NewFileSet(), "primitive.go", sourceCode, parser.AllErrors)
+	if err != nil {
+		return &NonDeterministicPrimitiveError{msg: fmt.Sprintf("invalid Go source: %v", err)}
+	}
+
 	var violations []string
+	aliases := make(map[string]string)
+	for _, spec := range file.Imports {
+		importPath, unquoteErr := strconv.Unquote(spec.Path.Value)
+		if unquoteErr != nil {
+			violations = append(violations, "invalid import path")
+			continue
+		}
+		if isBannedImport(importPath) {
+			violations = append(violations, fmt.Sprintf("Banned import '%s' found", importPath))
+		} else if _, allowed := allowedGoImports[importPath]; !allowed {
+			violations = append(violations, fmt.Sprintf("Import '%s' is not on the deterministic allow-list", importPath))
+		}
+		alias := spec.Name
+		if alias == nil {
+			parts := strings.Split(importPath, "/")
+			aliases[parts[len(parts)-1]] = importPath
+		} else if alias.Name == "." || alias.Name == "_" {
+			violations = append(violations, fmt.Sprintf("Import '%s' must not use dot or blank aliasing", importPath))
+		} else {
+			aliases[alias.Name] = importPath
+		}
+	}
 
-	goImportsParsed := false
-	if file, err := parser.ParseFile(token.NewFileSet(), "", sourceCode, parser.ImportsOnly); err == nil {
-		goImportsParsed = true
-		for _, spec := range file.Imports {
-			importPath, err := strconv.Unquote(spec.Path.Value)
-			if err != nil {
-				continue
+	for _, declaration := range file.Decls {
+		switch declaration := declaration.(type) {
+		case *ast.GenDecl:
+			if declaration.Tok == token.VAR {
+				violations = append(violations, "Package-level mutable state is not permitted")
 			}
-			if isBannedImport(importPath) {
-				violations = append(violations, fmt.Sprintf("Banned import '%s' found", importPath))
+		case *ast.FuncDecl:
+			if declaration.Name.Name == "init" {
+				violations = append(violations, "init functions are not permitted")
 			}
 		}
 	}
 
-	// Check for banned imports in Python-style snippets, or Go snippets that cannot be parsed.
-	for _, imp := range BannedImports {
-		patterns := []string{
-			fmt.Sprintf(`from\s+%s\s+import`, regexp.QuoteMeta(imp)),
-		}
-		if !goImportsParsed {
-			patterns = append(patterns,
-				fmt.Sprintf(`import\s+"%s"`, regexp.QuoteMeta(imp)),
-				fmt.Sprintf(`import\s+%s\b`, regexp.QuoteMeta(imp)),
-			)
-		}
-		for _, pattern := range patterns {
-			re := regexp.MustCompile(pattern)
-			if re.MatchString(sourceCode) {
-				violations = append(violations, fmt.Sprintf("Banned import '%s' found", imp))
+	ast.Inspect(file, func(node ast.Node) bool {
+		switch node := node.(type) {
+		case *ast.GoStmt:
+			violations = append(violations, "goroutines are not permitted")
+		case *ast.CallExpr:
+			selector, ok := node.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			identifier, ok := selector.X.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			qualified := identifier.Name + "." + selector.Sel.Name
+			for _, banned := range bannedFunctions {
+				if qualified == banned {
+					violations = append(violations, fmt.Sprintf("Banned function '%s' found", qualified))
+				}
+			}
+			if importPath, imported := aliases[identifier.Name]; imported && isBannedImport(importPath) {
+				violations = append(violations, fmt.Sprintf("Call through banned import '%s' found", importPath))
 			}
 		}
+		return true
+	})
+
+	return determinismViolations(violations)
+}
+
+func validateDeterministicScript(sourceCode string) error {
+	var violations []string
+	importPattern := regexp.MustCompile(`(?m)^\s*(?:from\s+([A-Za-z_][\w.]*)\s+import|import\s+([A-Za-z_][\w.]*))`)
+	for _, match := range importPattern.FindAllStringSubmatch(sourceCode, -1) {
+		importPath := match[1]
+		if importPath == "" {
+			importPath = match[2]
+		}
+		root := strings.Split(importPath, ".")[0]
+		if isBannedImport(root) {
+			violations = append(violations, fmt.Sprintf("Banned import '%s' found", importPath))
+		} else if _, allowed := allowedPythonImports[root]; !allowed {
+			violations = append(violations, fmt.Sprintf("Import '%s' is not on the deterministic allow-list", importPath))
+		}
 	}
-	// Check for banned function calls
-	for _, fn := range BannedFunctions {
-		pattern := regexp.QuoteMeta(fn) + `\s*\(`
-		re := regexp.MustCompile(pattern)
-		if re.MatchString(sourceCode) {
+	if strings.Contains(sourceCode, "__import__") {
+		violations = append(violations, "Direct __import__ call detected")
+	}
+	for _, fn := range bannedFunctions {
+		if regexp.MustCompile(regexp.QuoteMeta(fn) + `\s*\(`).MatchString(sourceCode) {
 			violations = append(violations, fmt.Sprintf("Banned function '%s' found", fn))
 		}
 	}
-
-	// Check for __import__ (Python compatibility)
-	if strings.Contains(sourceCode, "__import__") {
-		violations = append(violations, "Direct __import__ call detected - use import statements instead")
-	}
-
-	// Check for global mutable state patterns
-	globalMutablePatterns := []string{
-		`var\s+\w+\s*=\s*make\s*\(`, // var x = make(...)
-		`var\s+\w+\s*=\s*\[\]`,      // var x = []...
-		`var\s+\w+\s*=\s*map\s*\[`,  // var x = map[...]
-	}
-	for _, pattern := range globalMutablePatterns {
-		re := regexp.MustCompile(pattern)
-		if re.MatchString(sourceCode) {
-			violations = append(violations, "Potential global mutable state detected")
-			break
+	for _, pattern := range []string{
+		`(?m)^\s*global\s+`, `(?m)^\s*nonlocal\s+`, `\bopen\s*\(`,
+		`\beval\s*\(`, `\bexec\s*\(`,
+	} {
+		if regexp.MustCompile(pattern).MatchString(sourceCode) {
+			violations = append(violations, "Mutable or dynamic external operation detected")
 		}
 	}
-
-	if len(violations) > 0 {
-		return &NonDeterministicPrimitiveError{msg: strings.Join(violations, "; ")}
-	}
-	return nil
+	return determinismViolations(violations)
 }
 
-// ValidatePrimitiveSource validates that a primitive implementation is deterministic
-// Requires source code string since Go reflection cannot retrieve source
+func determinismViolations(violations []string) error {
+	if len(violations) == 0 {
+		return nil
+	}
+	return &NonDeterministicPrimitiveError{msg: strings.Join(violations, "; ")}
+}
+
+// ValidatePrimitiveSource validates a primitive implementation's supplied source.
 func (de *DeterminismEnforcer) ValidatePrimitiveSource(sourceCode string) error {
-	if sourceCode == "" {
+	if strings.TrimSpace(sourceCode) == "" {
 		return errors.New("source code required for validation - Go reflection cannot retrieve source")
 	}
 	return de.ValidateDeterministic(sourceCode)
 }
 
-// ValidatePrimitiveContract validates a primitive implements required interface
+// ValidatePrimitiveContract validates the minimum static primitive contract.
 func (de *DeterminismEnforcer) ValidatePrimitiveContract(p GovernancePrimitive) error {
-	if p == nil {
+	if primitiveIsNil(p) {
 		return errors.New("primitive cannot be nil")
 	}
-	if p.Version() == "" {
+	version, err := safePrimitiveVersion(p)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(version) == "" {
 		return errors.New("primitive must have non-empty version")
 	}
 	return nil

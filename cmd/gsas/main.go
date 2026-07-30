@@ -1,16 +1,13 @@
-// GSAS CLI entry point
+// GSAS CLI entry point.
 
 package main
 
 import (
-    "fmt"
-    "time"
-
+	"fmt"
+	"os"
 )
 
 func main() {
-    fmt.Println("gsas layer running...")
-    for {
-        time.Sleep(time.Hour)
-    }
+	fmt.Fprintln(os.Stderr, "gsas is an in-process governance library; no standalone service is configured")
+	os.Exit(1)
 }

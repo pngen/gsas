@@ -46,26 +46,24 @@ GSAS operates below applications and agents but above infrastructure, ensuring a
 Evaluates all governance primitives in strict sequence. Integrated into autonomous systems as a mandatory pre-execution gate. If all constraints pass, execution proceeds; otherwise, it fails closed with a structured proof.
 
 ### Composite Proof Generator  
-Produces structured, cryptographically verifiable proofs for every evaluation. Proofs are reconstructable without runtime access using SHA-256 commitment properties.
+Produces structured, tamper-evident proof envelopes for every evaluation. Embedded signal and context snapshots allow envelope integrity to be checked without access to the original runtime. These SHA-256 commitments do not authenticate an issuer or independently prove that an external primitive's implementation was trustworthy.
 
 ### Composition Operators  
 Compose multiple governance primitives with explicit semantics. Primitive contracts are type-safe and validated at registration time. Versioned contracts support long-term compatibility.
 
 ### Determinism Enforcer  
-Ensures all primitives are deterministic and reproducible. Immutable execution contexts with no mutable state across calls, no system time reads, no filesystem or network access, and no unseeded randomness.
+Uses immutable, losslessly copied execution contexts, context logical time, repeat-evaluation checks, and conservative source validation when a primitive exposes source. GSAS does not sandbox already-compiled in-process Go code: callers must treat unsourced primitive implementations as trusted code and isolate untrusted policies outside this process.
 
 ### Compliance Checker  
-Validates that primitives and deployments satisfy their contracts. Detects violations at registration time rather than at runtime.
+Validates non-empty deployments, primitive identity, result schema, static composition configuration, and repeatability. Registration runs the same checks, while evaluation rechecks version/source identity and fails closed on drift, panic, malformed output, or non-repeatable output.
 
 ### Failure Handler  
-Enforces fail-closed behavior on any missing or violated governance signal. Emits structured failures with full context for downstream analysis. No partial compliance.
+Enforces fail-closed behavior on empty policy sets, nil or invalid contexts, missing or violated signals, and proof-generation failures. Emits structured failures with committed context for downstream analysis. No partial compliance.
 
 ## Build
 
 ```bash
-go build -o gsas ./cmd/gsas/ # Linux/macOS
-
-go build -o gsas.exe ./cmd/gsas/ # Windows
+go build ./...
 ```
 
 ## Test
@@ -76,20 +74,16 @@ go get -t gsas/tests
 go test ./tests/... -v
 ```
 
-## Run
+## Runtime model
 
-```bash
-./gsas # Linux/macOS
-
-.\gsas.exe # Windows
-```
+GSAS is a Go library, not a configured daemon. Integrate `core.GovernanceEngine` as a mandatory in-process pre-execution gate. The `cmd/gsas` diagnostic exits nonzero so deployment tooling cannot mistake an inert process for a running governance service.
 
 ## Design Principles
 
 1. **Compositional** - Integrates existing primitives without weakening semantics.
-2. **Deterministic** - All evaluations are deterministic, reproducible, and explainable.
+2. **Deterministic** - Contexts and proof envelopes are reproducible; primitives are checked for repeatability and unsourced compiled code remains a documented trust boundary.
 3. **Fail-Closed** - No partial compliance. All governance signals must be satisfied.
-4. **Auditable** - Proofs are reconstructable without runtime access.
+4. **Auditable** - Proof envelope integrity is independently recomputable from its embedded snapshots.
 5. **Non-Interfering** - Does not mutate or assume ownership of underlying systems.
 6. **Type-Safe** - Strong typing ensures contract compliance at registration time.
 

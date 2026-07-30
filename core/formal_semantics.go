@@ -35,17 +35,17 @@ func (dcs *DeterministicContextSpec) GetItem(key string) (interface{}, error) {
 
 // GovernanceSignalSpec is a formal specification of GovernanceSignal
 type GovernanceSignalSpec struct {
-	Name   string                 `json:"name"`
-	Valid  bool                   `json:"valid"`
+	Name     string                 `json:"name"`
+	Valid    bool                   `json:"valid"`
 	Metadata map[string]interface{} `json:"metadata"`
 }
 
 // CompositeGovernanceDecisionSpec is a formal specification of CompositeGovernanceDecision
 type CompositeGovernanceDecisionSpec struct {
-	Permitted     bool                   `json:"permitted"`
-	Signals       []GovernanceSignalSpec `json:"signals"`
+	Permitted      bool                   `json:"permitted"`
+	Signals        []GovernanceSignalSpec `json:"signals"`
 	FailureReasons []string               `json:"failure_reasons"`
-	Proof         map[string]interface{} `json:"proof"`
+	Proof          map[string]interface{} `json:"proof"`
 }
 
 // CompositionSemantics provides formal specification of composition operators
@@ -53,17 +53,27 @@ type CompositionSemantics struct{}
 
 // SequentialAnd specifies sequential AND composition (specification)
 func (cs *CompositionSemantics) SequentialAnd(primitives []interface{}) interface{} {
-	return nil // Specification only
+	return (&PrimitiveComposer{}).SequentialAnd(asGovernancePrimitives(primitives))
 }
 
 // ParallelAnd specifies parallel AND composition (specification)
 func (cs *CompositionSemantics) ParallelAnd(primitives []interface{}) interface{} {
-	return nil // Specification only
+	return (&PrimitiveComposer{}).ParallelAnd(asGovernancePrimitives(primitives))
 }
 
 // Threshold specifies threshold composition (specification)
 func (cs *CompositionSemantics) Threshold(primitives []interface{}, k int) interface{} {
-	return nil // Specification only
+	return (&PrimitiveComposer{}).Threshold(asGovernancePrimitives(primitives), k)
+}
+
+func asGovernancePrimitives(values []interface{}) []GovernancePrimitive {
+	primitives := make([]GovernancePrimitive, len(values))
+	for index, value := range values {
+		if primitive, ok := value.(GovernancePrimitive); ok {
+			primitives[index] = primitive
+		}
+	}
+	return primitives
 }
 
 // SecurityProperties provides formal specification of security properties
@@ -84,5 +94,5 @@ type SHA256Commitment struct{}
 
 // Commit creates SHA256 commitment to signal content (specification)
 func (sc *SHA256Commitment) Commit(signalContent map[string]interface{}) string {
-	return "" // Specification only
+	return (&ProofGenerator{}).CommitSignal(signalContent)
 }
