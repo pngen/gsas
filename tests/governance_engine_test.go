@@ -55,7 +55,7 @@ func TestGovernanceEngineProofGeneration(t *testing.T) {
 	p1 := &MockPrimitive{name: "test", version: "2.0.0", valid: true}
 	engine.RegisterPrimitive("test", p1)
 
-	ctx := core.NewDeterministicContext(map[string]interface{}{}, 100)
+	ctx := core.NewDeterministicContext(map[string]interface{}{}, 12345)
 	decision := engine.EvaluateWithLogicalTime(ctx, 12345)
 
 	assert.NotNil(t, decision.Proof)

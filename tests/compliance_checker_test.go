@@ -32,6 +32,48 @@ func (b *NonBoolValidPrimitive) Evaluate(ctx interface{}) map[string]interface{}
 	return map[string]interface{}{"valid": "true"}
 }
 
+type StatefulPrimitive struct {
+	state bool
+}
+
+type AliasedAlternatingPrimitive struct {
+	result map[string]interface{}
+	calls  int
+}
+
+func (p *AliasedAlternatingPrimitive) Version() string { return "1.0.0" }
+func (p *AliasedAlternatingPrimitive) Evaluate(ctx interface{}) map[string]interface{} {
+	p.calls++
+	p.result["valid"] = p.calls%2 == 0
+	return p.result
+}
+
+type TypeAlternatingPrimitive struct {
+	calls int
+}
+
+func (p *TypeAlternatingPrimitive) Version() string { return "1.0.0" }
+func (p *TypeAlternatingPrimitive) Evaluate(ctx interface{}) map[string]interface{} {
+	p.calls++
+	var value interface{} = int64(1)
+	if p.calls%2 == 0 {
+		value = float64(1)
+	}
+	return map[string]interface{}{
+		"valid": true, "metadata": map[string]interface{}{"value": value}, "evidence": []interface{}{},
+	}
+}
+
+func (p *StatefulPrimitive) Version() string { return "1.0.0" }
+func (p *StatefulPrimitive) Evaluate(ctx interface{}) map[string]interface{} {
+	p.state = !p.state
+	return map[string]interface{}{
+		"valid":    p.state,
+		"metadata": map[string]interface{}{},
+		"evidence": []interface{}{},
+	}
+}
+
 func TestComplianceCheckerValidPrimitive(t *testing.T) {
 	checker := core.NewComplianceChecker()
 	p := &MockPrimitive{name: "valid", version: "1.0.0", valid: true}
@@ -70,4 +112,32 @@ func TestComplianceCheckerRejectsNonBoolValid(t *testing.T) {
 	assert.NoError(t, err)
 	assert.False(t, report.Compliant)
 	assert.Contains(t, report.Violations[0].Details, "boolean")
+}
+
+func TestComplianceCheckerRejectsEmptyAndNondeterministicDeployment(t *testing.T) {
+	checker := core.NewComplianceChecker()
+
+	empty, err := checker.CheckAll(nil)
+	assert.NoError(t, err)
+	assert.False(t, empty.Compliant)
+	assert.Contains(t, empty.Violations[0].Requirement, "non_empty")
+
+	report, err := checker.CheckPrimitive(&StatefulPrimitive{})
+	assert.NoError(t, err)
+	assert.False(t, report.Compliant)
+	assert.Contains(t, report.Violations[0].Requirement, "repeatability")
+}
+
+func TestComplianceSnapshotsFirstResultAndPreservesValueTypes(t *testing.T) {
+	checker := core.NewComplianceChecker()
+	aliased := &AliasedAlternatingPrimitive{result: map[string]interface{}{
+		"valid": false, "metadata": map[string]interface{}{}, "evidence": []interface{}{},
+	}}
+
+	for _, primitive := range []core.GovernancePrimitive{aliased, &TypeAlternatingPrimitive{}} {
+		report, err := checker.CheckPrimitive(primitive)
+		assert.NoError(t, err)
+		assert.False(t, report.Compliant)
+		assert.Contains(t, report.Violations[0].Requirement, "repeatability")
+	}
 }

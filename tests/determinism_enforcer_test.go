@@ -148,3 +148,35 @@ func TestValidatePrimitiveContractNil(t *testing.T) {
 	err := enforcer.ValidatePrimitiveContract(nil)
 	assert.Error(t, err)
 }
+
+func TestDeterminismRulesCannotBeDisabledByExportedCompatibilitySlices(t *testing.T) {
+	original := append([]string(nil), core.BannedImports...)
+	core.BannedImports = nil
+	t.Cleanup(func() { core.BannedImports = original })
+
+	enforcer := &core.DeterminismEnforcer{}
+	assert.Error(t, enforcer.ValidateDeterministic(`package primitive
+import "time"
+func evaluate() int64 { return time.Now().UnixNano() }
+`))
+}
+
+func TestDeterminismValidationRejectsMalformedAndUntrustedGoImports(t *testing.T) {
+	enforcer := &core.DeterminismEnforcer{}
+	assert.Error(t, enforcer.ValidateDeterministic("package primitive\nfunc broken("))
+	assert.Error(t, enforcer.ValidateDeterministic(`package primitive
+import "example.com/wrapper"
+func evaluate() bool { return wrapper.Allow() }
+`))
+}
+
+func TestDeterminismValidationRejectsPackageStateAndGoroutines(t *testing.T) {
+	enforcer := &core.DeterminismEnforcer{}
+	assert.Error(t, enforcer.ValidateDeterministic(`package primitive
+var counter int
+func evaluate() bool { counter++; return counter > 0 }
+`))
+	assert.Error(t, enforcer.ValidateDeterministic(`package primitive
+func evaluate() bool { go func(){}(); return true }
+`))
+}
