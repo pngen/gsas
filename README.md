@@ -74,9 +74,19 @@ go get -t gsas/tests
 go test ./tests/... -v
 ```
 
+## Run
+
+```bash
+go build ./...
+./gsas # Linux/macOS
+.\gsas.exe # Windows
+```
+
+`cmd/gsas` is the supervised AIGOS layer process: it emits the canonical startup line and remains alive until the supervisor terminates it.
+
 ## Runtime model
 
-GSAS is a Go library, not a configured daemon. Integrate `core.GovernanceEngine` as a mandatory in-process pre-execution gate. The `cmd/gsas` diagnostic exits nonzero so deployment tooling cannot mistake an inert process for a running governance service.
+Integrate `core.GovernanceEngine` as a mandatory in-process pre-execution gate in hosts that need governance enforcement. The standalone layer process provides the AIGOSD-supervised runtime presence.
 
 ## Design Principles
 
