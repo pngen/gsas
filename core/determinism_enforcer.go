@@ -152,17 +152,29 @@ func validateDeterministicGo(sourceCode string) error {
 
 func validateDeterministicScript(sourceCode string) error {
 	var violations []string
-	importPattern := regexp.MustCompile(`(?m)^\s*(?:from\s+([A-Za-z_][\w.]*)\s+import|import\s+([A-Za-z_][\w.]*))`)
+	// An import statement may start a line or follow a `;` or a compound
+	// statement's `:`, and a plain `import` may name several modules. Every
+	// imported module is checked, so an allowed module or an earlier statement
+	// cannot hide a banned one (`import json, os`).
+	importPattern := regexp.MustCompile(`(?m)(?:^|[;:])[ \t]*(?:from\s+([A-Za-z_][\w.]*)\s+import|import[ \t]+([^\n;#]*))`)
 	for _, match := range importPattern.FindAllStringSubmatch(sourceCode, -1) {
-		importPath := match[1]
-		if importPath == "" {
-			importPath = match[2]
+		importPaths := []string{match[1]}
+		if match[1] == "" {
+			importPaths = strings.Split(match[2], ",")
 		}
-		root := strings.Split(importPath, ".")[0]
-		if isBannedImport(root) {
-			violations = append(violations, fmt.Sprintf("Banned import '%s' found", importPath))
-		} else if _, allowed := allowedPythonImports[root]; !allowed {
-			violations = append(violations, fmt.Sprintf("Import '%s' is not on the deterministic allow-list", importPath))
+		for _, importPath := range importPaths {
+			fields := strings.Fields(importPath)
+			if len(fields) == 0 {
+				violations = append(violations, "Malformed import statement")
+				continue
+			}
+			importPath = fields[0]
+			root := strings.Split(importPath, ".")[0]
+			if isBannedImport(root) {
+				violations = append(violations, fmt.Sprintf("Banned import '%s' found", importPath))
+			} else if _, allowed := allowedPythonImports[root]; !allowed {
+				violations = append(violations, fmt.Sprintf("Import '%s' is not on the deterministic allow-list", importPath))
+			}
 		}
 	}
 	if strings.Contains(sourceCode, "__import__") {

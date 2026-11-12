@@ -129,6 +129,23 @@ def evaluate():
 	assert.Contains(t, err.Error(), "__import__")
 }
 
+func TestScriptImportsCannotHideBehindAnAllowedImportOrStatement(t *testing.T) {
+	enforcer := &core.DeterminismEnforcer{}
+	for _, source := range []string{
+		"import json, os\n\ndef evaluate():\n    return os.getpid()\n",
+		"import json as j, random as r\n\ndef evaluate():\n    return r.random()\n",
+		"import json; import socket\n\ndef evaluate():\n    return True\n",
+		"def evaluate(): import subprocess\n",
+	} {
+		assert.Error(t, enforcer.ValidateDeterministic(source), "accepted: %q", source)
+	}
+
+	// The same statement forms stay valid when every imported module is allowed.
+	assert.NoError(t, enforcer.ValidateDeterministic(
+		"import json, math as m; import re\n\ndef evaluate():\n    return True\n",
+	))
+}
+
 func TestEmptySourceCode(t *testing.T) {
 	enforcer := &core.DeterminismEnforcer{}
 	err := enforcer.ValidateDeterministic("")
